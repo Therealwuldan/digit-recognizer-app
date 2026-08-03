@@ -1,53 +1,67 @@
-from flask import Flask, render_template, request
-import torch
-import torch.nn as nn
-from torchvision import transforms
-from PIL import Image
+# ── IMPORTS ──────────────────────────────────────────────
+from flask import Flask, render_template, request  # Flask web framework tools
+import torch                                        # PyTorch core
+import torch.nn as nn                              # Neural network building blocks
+from torchvision import transforms                 # Image processing tools
+from PIL import Image                              # Open and manipulate image files
 
+# ── CREATE FLASK APP ──────────────────────────────────────
 app = Flask(__name__)
 
+# ── NEURAL NETWORK BLUEPRINT ──────────────────────────────
+# Defines the structure of the network — 3 layers, 784 → 128 → 64 → 10
 class NeuralNet(nn.Module):
     def __init__(self):
         super().__init__()
-
         self.fc1 = nn.Linear(784, 128)
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, 10)
 
-
-    def forward(self,x):
-        x = x.view(-1,784)
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)
+    # Defines how data flows through the layers when model is called
+    def forward(self, x):
+        x = x.view(-1, 784)                  # flatten image to 784 numbers
+        x = torch.relu(self.fc1(x))          # layer 1 + clean negatives
+        x = torch.relu(self.fc2(x))          # layer 2 + clean negatives
+        x = self.fc3(x)                      # layer 3 → 10 scores
         return x
 
+# ── LOAD TRAINED MODEL ────────────────────────────────────
+# Create empty model, load saved weights, switch to prediction mode
 model = NeuralNet()
 model.load_state_dict(torch.load("digit_model.pth"))
 model.eval()
 
-@app.route("/", methods=["GET","POST"])
+# ── ROUTE — HOMEPAGE ─────────────────────────────────────
+@app.route("/", methods=["GET", "POST"])
 def home():
     if request.method == "GET":
+        # Just show the upload form
         return render_template("digit.html")
+
     if request.method == "POST":
+        # ── GET THE UPLOADED FILE ─────────────────────────
         file = request.files["file"]
-        image = Image.open(file).convert("L")
-        image = image.resize((28, 28))
+
+        # ── PROCESS THE IMAGE ─────────────────────────────
+        image = Image.open(file).convert("L")    # open + convert to grayscale
+        image = image.resize((28, 28))           # resize to match training data
+
+        # Convert to tensor and normalize to match training format
         transform = transforms.Compose([
-            transforms. ToTensor(),
-            transforms.Normalize((0.5,),(0.5,))
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
         ])
-
         image_tensor = transform(image)
+        image_tensor = image_tensor.unsqueeze(0)  # add batch dimension
 
-        image_tensor = image_tensor.unsqueeze(0)
+        # ── RUN THROUGH MODEL ─────────────────────────────
+        with torch.no_grad():  # no training, just predicting
+            output = model(image_tensor)                      # get 10 scores
+            prediction = torch.argmax(output, dim=1).item()  # pick highest
 
-        with torch.no_grad():
-            output = model(image_tensor)  #calling/runing the class with the whole data and structure compressedinto image_tensor)
-            prediction = torch.argmax(output, dim=1).item()
+        # ── SEND RESULT TO HTML ───────────────────────────
+        return render_template("digit.html", prediction=prediction)
 
-        return render_template("digit.html", prediction = prediction)
-
+# ── START SERVER ──────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True)
